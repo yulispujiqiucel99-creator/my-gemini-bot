@@ -43,6 +43,7 @@ logger = logging.getLogger("pak-burhan")
 # =========================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_API_KEY_2 = os.getenv("OPENROUTER_API_KEY_2", "").strip()
 AI_MODEL = os.getenv("AI_MODEL", "qwen/qwen3.5-9b").strip()
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
@@ -144,6 +145,16 @@ if OPENROUTER_API_KEY:
         },
     )
 
+openrouter_client_2: Optional[AsyncOpenAI] = None  # ← baris baru
+if OPENROUTER_API_KEY_2:                            # ← baris baru
+    openrouter_client_2 = AsyncOpenAI(              # ← baris baru
+        api_key=OPENROUTER_API_KEY_2,               # ← baris baru
+        base_url=OPENROUTER_BASE_URL,               # ← baris baru
+        default_headers={                           # ← baris baru
+            "HTTP-Referer": "https://openrouter.ai/",  # ← baris baru
+            "X-Title": "Pak Burhan Discord Bot",    # ← baris baru
+        },                                          # ← baris baru
+    )                                               # ← baris baru
 
 # =========================
 # DATA STRUCTURES
@@ -662,17 +673,22 @@ async def ask_openrouter(
 
     history = get_context(user_id, channel_id)
     messages = build_messages(history, prompt[:MAX_PROMPT_CHARS], author_name)
-    response = await openrouter_client.chat.completions.create(
-        model=AI_MODEL,
-        messages=messages,
-        temperature=0.7,
-        max_tokens=8192,
-    )
-    answer = response.choices[0].message.content if response.choices else None
-    return (answer or "").strip() or (
-        "Maaf, Pak Burhan belum mendapat jawaban yang jelas. "
-        "Coba ulangi pertanyaannya ya."
-    )
+    try:
+        response = await openrouter_client.chat.completions.create(
+            model=AI_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=8192,
+        )
+    except Exception:
+        if openrouter_client_2 is None:
+            raise
+        response = await openrouter_client_2.chat.completions.create(
+            model=AI_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=8192,
+        )
 
 
 async def save_turn(
