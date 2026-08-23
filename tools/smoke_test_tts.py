@@ -1,26 +1,64 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bot import normalize_tts_text, remove_tts_file, synthesize_tts
+import bot
+
+
+class FakeCompletions:
+    async def create(self, **kwargs):
+        assert kwargs["temperature"] == 0.2
+        assert kwargs["max_tokens"] == 500
+        assert kwargs["messages"][0]["role"] == "system"
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="Ringkasan singkat AI.\nTidak ada simbol aneh 🤖"
+                    )
+                )
+            ]
+        )
+
+
+class FakeClient:
+    def __init__(self):
+        self.chat = SimpleNamespace(completions=FakeCompletions())
 
 
 async def main() -> None:
-    normalized = normalize_tts_text("Halo!!! @Pak_Burhan 🤖\nTes suara.")
-    assert normalized == "Halo!!! PakBurhan Tes suara.", normalized
-
-    path: Path | None = None
+    original_client = bot.openrouter_client
+    original_client_2 = bot.openrouter_client_2
+    bot.openrouter_client = FakeClient()
+    bot.openrouter_client_2 = None
     try:
-        path = await synthesize_tts("Halo, ini tes suara Pak Burhan.")
-        assert path.exists(), "File TTS tidak dibuat"
-        assert path.stat().st_size > 0, "File TTS kosong"
-        print(f"TTS PASS: {path.suffix} {path.stat().st_size} bytes")
+        rewritten = await bot.prepare_tts_text(
+            "Artikel panjang yang harus dipadatkan menjadi naskah audio."
+        )
+        assert rewritten == "Ringkasan singkat AI. Tidak ada simbol aneh"
+        assert len(rewritten) <= bot.TTS_MAX_CHARS
+        long_text = "kata " * bot.TTS_MAX_CHARS
+        assert len(bot.limit_tts_text(long_text)) <= bot.TTS_MAX_CHARS
+
+        normalized = bot.normalize_tts_text("Halo!!! @Pak_Burhan 🤖\nTes suara.")
+        assert normalized == "Halo!!! PakBurhan Tes suara.", normalized
+
+        path: Path | None = None
+        try:
+            path = await bot.synthesize_tts(rewritten)
+            assert path.exists(), "File TTS tidak dibuat"
+            assert path.stat().st_size > 0, "File TTS kosong"
+            print(f"TTS PASS: {path.suffix} {path.stat().st_size} bytes")
+        finally:
+            if path is not None:
+                await bot.remove_tts_file(path)
+            assert path is None or not path.exists(), "File sementara belum terhapus"
     finally:
-        if path is not None:
-            await remove_tts_file(path)
-        assert path is None or not path.exists(), "File sementara belum terhapus"
+        bot.openrouter_client = original_client
+        bot.openrouter_client_2 = original_client_2
 
 
 if __name__ == "__main__":

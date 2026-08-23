@@ -57,6 +57,10 @@ try:
 except ValueError:
     TTS_MAX_CHARS = 800
 try:
+    TTS_SOURCE_MAX_CHARS = max(TTS_MAX_CHARS, int(os.getenv("TTS_SOURCE_MAX_CHARS", "12000")))
+except ValueError:
+    TTS_SOURCE_MAX_CHARS = 12000
+try:
     TTS_COOLDOWN_SECONDS = max(5, int(os.getenv("TTS_COOLDOWN_SECONDS", "15")))
 except ValueError:
     TTS_COOLDOWN_SECONDS = 15
@@ -143,6 +147,23 @@ POLITE_TOXIC_REPLY = (
     "Nah, mas/mbak. Saya ini Pak Burhan, wali kelas 7D. "
     "Biasakan berbicara dengan sopan ya. Setelah itu baru kita lanjutkan."
 )
+
+TTS_EDITOR_PROMPT = f"""
+Kamu adalah editor naskah audio Pak Burhan.
+Ubah teks sumber dari pengguna menjadi naskah bahasa Indonesia yang singkat, padat,
+jelas, dan enak didengar. Jangan mengulang teks mentah-mentah. Ambil inti dan detail
+paling penting saja. Jika sumber berupa berita atau artikel, rangkum pokok bahasan,
+fakta utama, dan kesimpulan singkat tanpa menambah fakta baru.
+
+Aturan wajib:
+- Hanya keluarkan naskah final yang siap dibacakan, tanpa judul, pembuka, komentar,
+  markdown, daftar bernomor, emoji, hashtag, URL, atau simbol aneh.
+- Gunakan huruf, angka, spasi, dan tanda baca umum seperti titik, koma, tanda tanya,
+  tanda seru, kurung, titik dua, titik koma, dan tanda hubung.
+- Targetkan paling banyak {TTS_MAX_CHARS} karakter agar durasi audio sekitar maksimal
+  satu setengah menit. Jangan memotong kalimat di tengah jika masih bisa dipadatkan.
+- Jangan menyebut bahwa kamu sedang meringkas atau bahwa teks ini berasal dari pengguna.
+""".strip()
 
 # =========================
 # OPENROUTER / OPENAI SDK
@@ -410,6 +431,51 @@ def normalize_tts_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def limit_tts_text(text: str) -> str:
+    """Apply a hard output limit without cutting a word when possible."""
+    if len(text) <= TTS_MAX_CHARS:
+        return text
+    shortened = text[:TTS_MAX_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return shortened.rstrip(".!?") + "."
+
+
+async def prepare_tts_text(source_text: str) -> str:
+    """Rewrite source text with OpenRouter before sending it to Edge TTS."""
+    clients: list[tuple[str, AsyncOpenAI]] = []
+    if openrouter_client is not None:
+        clients.append(("utama", openrouter_client))
+    if openrouter_client_2 is not None:
+        clients.append(("cadangan", openrouter_client_2))
+    if not clients:
+        raise RuntimeError("OpenRouter belum tersedia untuk memproses teks TTS")
+
+    messages = [
+        {"role": "system", "content": TTS_EDITOR_PROMPT},
+        {"role": "user", "content": source_text},
+    ]
+    last_error: Optional[Exception] = None
+    for label, client in clients:
+        try:
+            result = await call_openrouter_single(
+                client,
+                messages,
+                temperature=0.2,
+                max_tokens=500,
+            )
+            result = normalize_tts_text(result)
+            result = limit_tts_text(result)
+            if not result:
+                raise ValueError("OpenRouter mengembalikan naskah TTS kosong")
+            if label == "cadangan":
+                logger.info("Pemrosesan TTS memakai API key cadangan.")
+            return result
+        except Exception as error:
+            last_error = error
+            logger.warning("Gagal memproses naskah TTS dengan key %s: %s", label, error)
+
+    raise RuntimeError("OpenRouter gagal memproses naskah TTS") from last_error
+
+
 async def synthesize_tts(text: str) -> Path:
     """Generate an MP3 in a temporary directory and return its path."""
     temporary_directory = Path(tempfile.mkdtemp(prefix="pak-burhan-tts-"))
@@ -507,13 +573,19 @@ def cleanup_spam_tracking() -> None:
             user_last_notice.pop(tracking_user_id, None)
 
 
-async def call_openrouter_single(client: AsyncOpenAI, messages: list[dict[str, str]]) -> str:
+async def call_openrouter_single(
+    client: AsyncOpenAI,
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.7,
+    max_tokens: int = 8192,
+) -> str:
     """Panggil satu client OpenRouter, return string atau raise exception."""
     response = await client.chat.completions.create(
         model=AI_MODEL,
         messages=messages,
-        temperature=0.7,
-        max_tokens=8192,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
     answer = response.choices[0].message.content if response.choices else None
     if not answer:
@@ -1325,22 +1397,22 @@ async def help_command(interaction: discord.Interaction) -> None:
 
 
 @bot.tree.command(name="tts", description="Ubah teks menjadi audio Pak Burhan")
-@app_commands.describe(teks=f"Teks singkat, maksimal {TTS_MAX_CHARS} karakter")
+@app_commands.describe(teks=f"Teks yang akan diringkas AI, maksimal {TTS_SOURCE_MAX_CHARS} karakter")
 async def tts(interaction: discord.Interaction, teks: str) -> None:
     """Generate one manually requested TTS attachment without auto-sending."""
     await interaction.response.defer(thinking=True)
     try:
-        text = normalize_tts_text(teks)
-        if not text:
+        source_text = re.sub(r"\s+", " ", teks).strip()
+        if not source_text:
             await interaction.followup.send("Teksnya belum diisi ya.", ephemeral=True)
             return
-        if len(text) > TTS_MAX_CHARS:
+        if len(source_text) > TTS_SOURCE_MAX_CHARS:
             await interaction.followup.send(
-                f"Teks terlalu panjang. Maksimal {TTS_MAX_CHARS} karakter ya.",
+                f"Teks sumber terlalu panjang. Maksimal {TTS_SOURCE_MAX_CHARS} karakter ya.",
                 ephemeral=True,
             )
             return
-        if is_rude(text):
+        if is_rude(source_text):
             await interaction.followup.send(POLITE_TOXIC_REPLY, ephemeral=True)
             return
 
@@ -1354,10 +1426,11 @@ async def tts(interaction: discord.Interaction, teks: str) -> None:
 
         async with tts_generation_lock:
             tts_last_used[interaction.user.id] = time.monotonic()
-            audio_path = await synthesize_tts(text)
+            tts_text = await prepare_tts_text(source_text)
+            audio_path = await synthesize_tts(tts_text)
         try:
             await interaction.followup.send(
-                content=f"🔊 TTS selesai · suara `{TTS_VOICE}`",
+                content=f"🔊 TTS selesai · teks diringkas AI · suara `{TTS_VOICE}`",
                 file=discord.File(audio_path, filename="pak-burhan-tts.mp3"),
             )
         finally:

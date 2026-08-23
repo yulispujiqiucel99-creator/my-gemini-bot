@@ -45,21 +45,25 @@ Discord bot Pak Burhan dengan OpenRouter, memory user/channel, AI Room, slash co
      memory permanen. Kalau dikosongkan, `/ingat` dan `/lupakan` memakai
      fallback lokal `data/permanent_memory.json`.
    - `TTS_VOICE` — opsional, default `id-ID-ArdiNeural` untuk command `/tts`.
-   - `TTS_MAX_CHARS` — opsional, batas panjang teks TTS; default 800 karakter.
+   - `TTS_MAX_CHARS` — opsional, batas naskah hasil ringkasan AI; default 800 karakter.
+   - `TTS_SOURCE_MAX_CHARS` — opsional, batas teks mentah sebelum diringkas AI; default 12.000 karakter.
    - `TTS_COOLDOWN_SECONDS` — opsional, jeda per user; default 15 detik.
 4. Jalankan:
    `python bot.py`
 
 ### Text-to-speech
 
-Command `/tts` mengubah teks menjadi file MP3 menggunakan Edge TTS dan mengirimkannya
-sebagai attachment Discord. Fitur ini hanya berjalan melalui permintaan manual; bot
-tidak mengirim audio secara otomatis. Teks harus singkat, padat, dan jelas. Whitespace
-dirapikan, sedangkan simbol yang tidak umum dibuang sebelum dibacakan. Batas default
-800 karakter dipakai secara konservatif agar audio sekitar maksimal 1,5 menit; durasi
-aktual tetap bergantung pada kecepatan suara. Setiap user memiliki cooldown
-`TTS_COOLDOWN_SECONDS`, dan file MP3 sementara dihapus setelah Discord selesai
-mengunggahnya. Edge TTS tidak memerlukan API key, tetapi tetap dapat mengalami
-throttling atau perubahan layanan karena bukan API komersial dengan SLA.
+Command `/tts` mengirim teks mentah ke OpenRouter terlebih dahulu. AI akan mengambil
+inti informasi dan mengubahnya menjadi naskah bahasa Indonesia yang singkat, padat,
+jelas, dan enak didengar; jadi teks tidak dibacakan mentah-mentah. Setelah itu, naskah
+hasil edit dibersihkan dari simbol aneh lalu diubah menjadi file MP3 menggunakan Edge
+TTS dan dikirim sebagai attachment Discord. Fitur ini hanya berjalan melalui permintaan
+manual; bot tidak mengirim audio secara otomatis. Teks mentah dibatasi oleh
+`TTS_SOURCE_MAX_CHARS`, sedangkan naskah hasil AI dibatasi default 800 karakter secara
+konservatif agar audio sekitar maksimal 1,5 menit; durasi aktual tetap bergantung pada
+kecepatan suara. Setiap user memiliki cooldown `TTS_COOLDOWN_SECONDS`, dan file MP3
+sementara dihapus setelah Discord selesai mengunggahnya. Edge TTS tidak memerlukan API
+key, tetapi tetap dapat mengalami throttling atau perubahan layanan karena bukan API
+komersial dengan SLA.
 
 Jangan membagikan file `.env` karena berisi token rahasia.
