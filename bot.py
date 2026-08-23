@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
@@ -28,6 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
+import edge_tts
 from openai import AsyncOpenAI
 from pypdf import PdfReader
 
@@ -49,6 +51,15 @@ AI_MODEL = os.getenv("AI_MODEL", "qwen/qwen3.5-9b").strip()
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+TTS_VOICE = os.getenv("TTS_VOICE", "id-ID-ArdiNeural").strip() or "id-ID-ArdiNeural"
+try:
+    TTS_MAX_CHARS = max(100, int(os.getenv("TTS_MAX_CHARS", "800")))
+except ValueError:
+    TTS_MAX_CHARS = 800
+try:
+    TTS_COOLDOWN_SECONDS = max(5, int(os.getenv("TTS_COOLDOWN_SECONDS", "15")))
+except ValueError:
+    TTS_COOLDOWN_SECONDS = 15
 
 # =========================
 # FILE DATA
@@ -189,6 +200,8 @@ user_last_used: dict[int, float] = {}
 user_request_times: defaultdict[int, deque[float]] = defaultdict(deque)
 user_recent_prompts: defaultdict[int, deque[tuple[float, str]]] = defaultdict(deque)
 user_last_notice: dict[int, float] = {}
+tts_last_used: dict[int, float] = {}
+tts_generation_lock = asyncio.Lock()
 
 
 # =========================
@@ -383,6 +396,37 @@ def split_text(text: str, limit: int = MAX_REPLY_CHARS) -> list[str]:
 def cooldown_left(user_id: int) -> float:
     last = user_last_used.get(user_id, 0.0)
     return max(0.0, COOLDOWN_SECONDS - (time.monotonic() - last))
+
+
+def tts_cooldown_left(user_id: int) -> float:
+    last = tts_last_used.get(user_id, 0.0)
+    return max(0.0, TTS_COOLDOWN_SECONDS - (time.monotonic() - last))
+
+
+async def synthesize_tts(text: str) -> Path:
+    """Generate an MP3 in a temporary directory and return its path."""
+    temporary_directory = Path(tempfile.mkdtemp(prefix="pak-burhan-tts-"))
+    output_path = temporary_directory / "pak-burhan-tts.mp3"
+    try:
+        communicator = edge_tts.Communicate(text=text, voice=TTS_VOICE)
+        await communicator.save(str(output_path))
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError("Edge TTS tidak menghasilkan file audio")
+        return output_path
+    except Exception:
+        # Jangan tinggalkan folder sementara ketika provider gagal.
+        output_path.unlink(missing_ok=True)
+        temporary_directory.rmdir()
+        raise
+
+
+async def remove_tts_file(path: Path) -> None:
+    """Hapus file dan folder sementara TTS setelah Discord selesai membaca."""
+    try:
+        path.unlink(missing_ok=True)
+        path.parent.rmdir()
+    except OSError as error:
+        logger.warning("Gagal membersihkan file TTS sementara: %s", error)
 
 
 def check_spam_and_cooldown(user_id: int, prompt: str) -> tuple[bool, Optional[str]]:
@@ -1264,12 +1308,59 @@ async def help_command(interaction: discord.Interaction) -> None:
         "• Mention saya atau gunakan `/ask` untuk bertanya.\n"
         "• Kirim PDF bersama pertanyaan untuk dibaca, dirangkum, atau dianalisis.\n"
         "• `/searching` untuk tanya sambil dipastikan bot cari jawabannya di internet.\n"
+        "• `/tts [teks]` mengubah teks menjadi audio secara manual.\n"
         "• `/ingat [catatan]` menyimpan hal yang mau selalu diinget Pak Burhan.\n"
         "• `/lupakan` menghapus semua ingatan permanen kamu.\n"
         "• `/reset` menghapus memory percakapan personal kamu.\n"
         "• `/status` melihat status bot dan model yang aktif.\n"
         "• Admin: `/airoom enable`, `/airoom disable`, atau `/airoom list`."
     )
+
+
+@bot.tree.command(name="tts", description="Ubah teks menjadi audio Pak Burhan")
+@app_commands.describe(teks="Teks yang akan dibacakan, maksimal 800 karakter")
+async def tts(interaction: discord.Interaction, teks: str) -> None:
+    """Generate one manually requested TTS attachment without auto-sending."""
+    await interaction.response.defer(thinking=True)
+    try:
+        text = re.sub(r"\s+", " ", teks).strip()
+        if not text:
+            await interaction.followup.send("Teksnya belum diisi ya.", ephemeral=True)
+            return
+        if len(text) > TTS_MAX_CHARS:
+            await interaction.followup.send(
+                f"Teks terlalu panjang. Maksimal {TTS_MAX_CHARS} karakter ya.",
+                ephemeral=True,
+            )
+            return
+        if is_rude(text):
+            await interaction.followup.send(POLITE_TOXIC_REPLY, ephemeral=True)
+            return
+
+        remaining = tts_cooldown_left(interaction.user.id)
+        if remaining > 0:
+            await interaction.followup.send(
+                f"Tunggu sebentar ya, TTS bisa dipakai lagi dalam {remaining:.0f} detik.",
+                ephemeral=True,
+            )
+            return
+
+        async with tts_generation_lock:
+            tts_last_used[interaction.user.id] = time.monotonic()
+            audio_path = await synthesize_tts(text)
+        try:
+            await interaction.followup.send(
+                content=f"🔊 TTS selesai · suara `{TTS_VOICE}`",
+                file=discord.File(audio_path, filename="pak-burhan-tts.mp3"),
+            )
+        finally:
+            await remove_tts_file(audio_path)
+    except Exception as error:
+        logger.exception("Error pada /tts: %s", error)
+        await interaction.followup.send(
+            "Maaf, suara belum bisa dibuat sekarang. Coba lagi sebentar ya.",
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(name="reset", description="Hapus memori chat kamu")
