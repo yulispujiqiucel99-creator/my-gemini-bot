@@ -22,6 +22,23 @@ assert bot.is_short_follow_up("Wah 😋🤤")
 assert bot.is_short_follow_up("Wah, enak banget")
 assert not bot.is_short_follow_up("Buntut lele enak tidak?")
 
+bot.MEMORY = {
+    "1": bot.UserMemory(
+        [
+            {"role": "user", "text": "Buntut lele itu enak tidak?"},
+            {"role": "assistant", "text": "Buntut lele gurih jika dimasak dengan bumbu yang tepat."},
+        ]
+    )
+}
+bot.CHANNEL_MEMORY = {
+    "channel-1": bot.ChannelMemory(
+        [{"role": "assistant", "text": "Sop buntut memakai kuah kaldu."}]
+    )
+}
+user_context = bot.get_context(1, 1)
+assert any("Buntut lele" in item["text"] for item in user_context)
+assert not any("Sop buntut" in item["text"] for item in user_context)
+
 messages = bot.build_messages(history, "Wah, enak banget 😋🤤", "Naufal")
 new_topic_messages = bot.build_messages(history, "Buntut lele enak tidak?", "Naufal")
 

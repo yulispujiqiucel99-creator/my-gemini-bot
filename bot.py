@@ -673,18 +673,17 @@ async def cleanup_spam_tracking_task() -> None:
 
 
 def get_context(user_id: int, channel_id: int) -> list[dict[str, str]]:
-    """Ambil konteks channel tanpa mencampur dan menggandakan obrolan lain."""
-    channel_history = trim_history(
+    """Ambil context utama dari percakapan user agar channel lain tidak bocor."""
+    user_history = trim_history(MEMORY.get(str(user_id), UserMemory([])).history)
+    if user_history:
+        # Memory user berisi pasangan pertanyaan dan jawaban bot milik user ini.
+        # Jadikan ini sumber utama agar obrolan user lain di AI room tidak ikut.
+        return user_history[-RECENT_CONTEXT_ITEMS:]
+
+    # Fallback untuk user baru atau data lama yang hanya punya history channel.
+    return trim_history(
         CHANNEL_MEMORY.get(str(channel_id), ChannelMemory([])).history
     )[-RECENT_CONTEXT_ITEMS:]
-    if channel_history:
-        # Ini adalah urutan percakapan yang sedang aktif. Jangan menambahkan
-        # memory user dari channel lain karena bisa membuat topik lama muncul
-        # setelah topik baru dan membingungkan model.
-        return channel_history
-
-    # Fallback untuk data lama atau channel yang belum punya history.
-    return trim_history(MEMORY.get(str(user_id), UserMemory([])).history)[-RECENT_CONTEXT_ITEMS:]
 
 
 JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
