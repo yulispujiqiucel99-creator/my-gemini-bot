@@ -662,10 +662,18 @@ async def cleanup_spam_tracking_task() -> None:
 
 
 def get_context(user_id: int, channel_id: int) -> list[dict[str, str]]:
-    """Gabungkan konteks channel dan memory personal secara ringkas."""
-    channel_history = CHANNEL_MEMORY.get(str(channel_id), ChannelMemory([])).history
-    user_history = MEMORY.get(str(user_id), UserMemory([])).history
-    return trim_history(channel_history) + trim_history(user_history)
+    """Ambil konteks channel tanpa mencampur dan menggandakan obrolan lain."""
+    channel_history = trim_history(
+        CHANNEL_MEMORY.get(str(channel_id), ChannelMemory([])).history
+    )
+    if channel_history:
+        # Ini adalah urutan percakapan yang sedang aktif. Jangan menambahkan
+        # memory user dari channel lain karena bisa membuat topik lama muncul
+        # setelah topik baru dan membingungkan model.
+        return channel_history
+
+    # Fallback untuk data lama atau channel yang belum punya history.
+    return trim_history(MEMORY.get(str(user_id), UserMemory([])).history)
 
 
 JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
@@ -708,6 +716,13 @@ def build_messages(
     user_memories: Optional[list[str]] = None,
 ) -> list[dict[str, str]]:
     system_content = f"{SYSTEM_PROMPT}\n\n{get_time_context()}"
+    if history:
+        system_content += (
+            "\n\n[Aturan kesinambungan percakapan: gunakan history di bawah sebagai "
+            "konteks aktif. Balasan user yang pendek, emoji, atau reaksi seperti "
+            "wah, mantap, atau hehe biasanya menanggapi jawaban Pak Burhan "
+            "sebelumnya. Balas secara nyambung dengan topik terakhir dan jangan "
+            "berpura-pura baru bertemu atau lupa konteks.]")
     if user_memories:
         memory_lines = "\n".join(f"- {catatan}" for catatan in user_memories)
         system_content += (
@@ -723,6 +738,18 @@ def build_messages(
         if item.get("role") == "user" and item.get("author"):
             content = f"[{item['author']}]: {content}"
         messages.append({"role": item["role"], "content": content})
+    if history and len(user_text.strip()) <= 120:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "[Balasan terbaru user sangat singkat. Pahami sebagai lanjutan "
+                    "dari jawaban assistant terakhir. Pertahankan topik terakhir "
+                    "dan jawab secara natural; jangan memulai topik baru atau "
+                    "mengaku lupa percakapan.]"
+                ),
+            }
+        )
     messages.append({"role": "user", "content": f"[{author_name}]: {user_text}"})
     return messages
 
