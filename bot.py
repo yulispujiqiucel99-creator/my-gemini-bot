@@ -141,6 +141,7 @@ MAX_PDF_BYTES = 8 * 1024 * 1024
 MAX_PDF_TEXT_CHARS = 28_000
 MAX_SEARCH_RESULTS = 5
 MAX_PROMPT_CHARS = 36_000
+RECENT_CONTEXT_ITEMS = 8
 STALE_TRACKING_SECONDS = 3600
 
 POLITE_TOXIC_REPLY = (
@@ -673,7 +674,7 @@ def get_context(user_id: int, channel_id: int) -> list[dict[str, str]]:
     """Ambil konteks channel tanpa mencampur dan menggandakan obrolan lain."""
     channel_history = trim_history(
         CHANNEL_MEMORY.get(str(channel_id), ChannelMemory([])).history
-    )
+    )[-RECENT_CONTEXT_ITEMS:]
     if channel_history:
         # Ini adalah urutan percakapan yang sedang aktif. Jangan menambahkan
         # memory user dari channel lain karena bisa membuat topik lama muncul
@@ -681,7 +682,7 @@ def get_context(user_id: int, channel_id: int) -> list[dict[str, str]]:
         return channel_history
 
     # Fallback untuk data lama atau channel yang belum punya history.
-    return trim_history(MEMORY.get(str(user_id), UserMemory([])).history)
+    return trim_history(MEMORY.get(str(user_id), UserMemory([])).history)[-RECENT_CONTEXT_ITEMS:]
 
 
 JAKARTA_TZ = pytz.timezone("Asia/Jakarta")
@@ -717,6 +718,38 @@ def get_time_context() -> str:
     )
 
 
+SHORT_FOLLOW_UP_MARKERS = (
+    "wah",
+    "wkwk",
+    "hehe",
+    "haha",
+    "mantap",
+    "keren",
+    "enak",
+    "serius",
+    "oh",
+    "iya",
+    "ya",
+    "lanjut",
+    "terus",
+    "trus",
+    "boleh",
+    "oke",
+    "ok",
+)
+
+
+def is_short_follow_up(text: str) -> bool:
+    """Detect reactions that need the previous answer as an explicit anchor."""
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    if not cleaned or len(text.strip()) > 120 or len(cleaned.split()) > 8:
+        return False
+    return any(
+        cleaned == marker or cleaned.startswith(f"{marker} ")
+        for marker in SHORT_FOLLOW_UP_MARKERS
+    )
+
+
 def build_messages(
     history: list[dict[str, str]],
     user_text: str,
@@ -730,13 +763,14 @@ def build_messages(
             "konteks aktif. Balasan user yang pendek, emoji, atau reaksi seperti "
             "wah, mantap, atau hehe biasanya menanggapi jawaban Pak Burhan "
             "sebelumnya. Balas secara nyambung dengan topik terakhir dan jangan "
-            "berpura-pura baru bertemu atau lupa konteks.]"
+            "berpura-pura baru bertemu atau lupa konteks. Pesan user terbaru "
+            "selalu menjadi prioritas utama jika membuka topik baru.]"
         )
         last_assistant = next(
             (item["text"] for item in reversed(history) if item.get("role") == "assistant"),
             "",
         )
-        if last_assistant and len(user_text.strip()) <= 120:
+        if last_assistant and is_short_follow_up(user_text):
             system_content += (
                 "\n\n[Jangkar balasan pendek: jawaban assistant terakhir adalah "
                 "topik utama yang sedang ditanggapi user. Gunakan konteks ini: "
@@ -757,6 +791,21 @@ def build_messages(
         if item.get("role") == "user" and item.get("author"):
             content = f"[{item['author']}]: {content}"
         messages.append({"role": item["role"], "content": content})
+    if history:
+        if is_short_follow_up(user_text):
+            latest_instruction = (
+                "[PESAN TERBARU USER ADALAH REAKSI PENDEK. Hubungkan dengan "
+                "jawaban assistant tepat sebelumnya dan tetap di topik itu.]"
+            )
+        else:
+            latest_instruction = (
+                "[PESAN TERBARU USER ADALAH PRIORITAS TERTINGGI. Jawab tepat "
+                "pertanyaan atau topik terbaru ini. Jika bertentangan dengan "
+                "history, anggap topik lama sudah ditinggalkan. Gunakan history "
+                "hanya jika memang membantu, dan jangan memaksakan topik lama "
+                "yang hanya memiliki kata mirip.]"
+            )
+        messages.append({"role": "system", "content": latest_instruction})
     messages.append({"role": "user", "content": f"[{author_name}]: {user_text}"})
     return messages
 
