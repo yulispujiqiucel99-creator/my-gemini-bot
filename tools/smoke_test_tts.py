@@ -4,10 +4,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bot import remove_tts_file, synthesize_tts
+from bot import normalize_tts_text, remove_tts_file, synthesize_tts
 
 
 async def main() -> None:
+    normalized = normalize_tts_text("Halo!!! @Pak_Burhan 🤖\nTes suara.")
+    assert normalized == "Halo!!! PakBurhan Tes suara.", normalized
+
     path: Path | None = None
     try:
         path = await synthesize_tts("Halo, ini tes suara Pak Burhan.")

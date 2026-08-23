@@ -403,6 +403,13 @@ def tts_cooldown_left(user_id: int) -> float:
     return max(0.0, TTS_COOLDOWN_SECONDS - (time.monotonic() - last))
 
 
+def normalize_tts_text(text: str) -> str:
+    """Keep TTS input concise and readable without unusual symbols."""
+    text = re.sub(r"[^\w\s.,!?;:'\"()\-]", "", text, flags=re.UNICODE)
+    text = text.replace("_", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
 async def synthesize_tts(text: str) -> Path:
     """Generate an MP3 in a temporary directory and return its path."""
     temporary_directory = Path(tempfile.mkdtemp(prefix="pak-burhan-tts-"))
@@ -1318,12 +1325,12 @@ async def help_command(interaction: discord.Interaction) -> None:
 
 
 @bot.tree.command(name="tts", description="Ubah teks menjadi audio Pak Burhan")
-@app_commands.describe(teks="Teks yang akan dibacakan, maksimal 800 karakter")
+@app_commands.describe(teks=f"Teks singkat, maksimal {TTS_MAX_CHARS} karakter")
 async def tts(interaction: discord.Interaction, teks: str) -> None:
     """Generate one manually requested TTS attachment without auto-sending."""
     await interaction.response.defer(thinking=True)
     try:
-        text = re.sub(r"\s+", " ", teks).strip()
+        text = normalize_tts_text(teks)
         if not text:
             await interaction.followup.send("Teksnya belum diisi ya.", ephemeral=True)
             return

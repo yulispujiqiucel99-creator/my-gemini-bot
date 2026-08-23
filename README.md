@@ -54,9 +54,12 @@ Discord bot Pak Burhan dengan OpenRouter, memory user/channel, AI Room, slash co
 
 Command `/tts` mengubah teks menjadi file MP3 menggunakan Edge TTS dan mengirimkannya
 sebagai attachment Discord. Fitur ini hanya berjalan melalui permintaan manual; bot
-tidak mengirim audio secara otomatis. Teks dibatasi oleh `TTS_MAX_CHARS`, setiap user
-memiliki cooldown `TTS_COOLDOWN_SECONDS`, dan file MP3 sementara dihapus setelah
-Discord selesai mengunggahnya. Edge TTS tidak memerlukan API key, tetapi tetap dapat
-mengalami throttling atau perubahan layanan karena bukan API komersial dengan SLA.
+tidak mengirim audio secara otomatis. Teks harus singkat, padat, dan jelas. Whitespace
+dirapikan, sedangkan simbol yang tidak umum dibuang sebelum dibacakan. Batas default
+800 karakter dipakai secara konservatif agar audio sekitar maksimal 1,5 menit; durasi
+aktual tetap bergantung pada kecepatan suara. Setiap user memiliki cooldown
+`TTS_COOLDOWN_SECONDS`, dan file MP3 sementara dihapus setelah Discord selesai
+mengunggahnya. Edge TTS tidak memerlukan API key, tetapi tetap dapat mengalami
+throttling atau perubahan layanan karena bukan API komersial dengan SLA.
 
 Jangan membagikan file `.env` karena berisi token rahasia.
