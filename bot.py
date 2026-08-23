@@ -57,6 +57,7 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
 CONFIG_FILE = DATA_DIR / "config.json"
+PERMANENT_MEMORY_FILE = DATA_DIR / "permanent_memory.json"
 
 # GIF untuk status searching (folder assets di sebelah bot.py)
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
@@ -176,8 +177,10 @@ class GuildConfig:
 
 memory_lock = asyncio.Lock()
 config_lock = asyncio.Lock()
+permanent_memory_lock = asyncio.Lock()
 MEMORY: dict[str, UserMemory] = {}
 CHANNEL_MEMORY: dict[str, ChannelMemory] = {}
+PERMANENT_MEMORY: dict[str, list[str]] = {}
 CONFIG: dict[str, GuildConfig] = {}
 
 # State anti-spam disimpan di memory proses, sedangkan memory percakapan
@@ -281,6 +284,24 @@ def save_memory(
     )
 
 
+def load_permanent_memories() -> dict[str, list[str]]:
+    raw = load_json(PERMANENT_MEMORY_FILE, {})
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for user_id, values in raw.items():
+        if not isinstance(values, list):
+            continue
+        cleaned = [item.strip() for item in values if isinstance(item, str) and item.strip()]
+        if cleaned:
+            result[str(user_id)] = cleaned[-20:]
+    return result
+
+
+def save_permanent_memories(memories: dict[str, list[str]]) -> None:
+    save_json(PERMANENT_MEMORY_FILE, memories)
+
+
 def load_config() -> dict[str, GuildConfig]:
     raw = load_json(CONFIG_FILE, {})
     result: dict[str, GuildConfig] = {}
@@ -308,6 +329,7 @@ def save_config(config: dict[str, GuildConfig]) -> None:
 
 
 MEMORY, CHANNEL_MEMORY = load_memory()
+PERMANENT_MEMORY = load_permanent_memories()
 CONFIG = load_config()
 
 
@@ -855,26 +877,35 @@ async def init_db() -> None:
 
 
 async def save_user_memory(user_id: int, memory_text: str) -> bool:
-    if db_pool is None:
-        return False
-    try:
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO user_memories (user_id, memory_text) VALUES ($1, $2)",
-                str(user_id),
-                memory_text,
-            )
-        return True
-    except Exception as error:
-        logger.warning("Gagal simpan memory permanen user %s: %s", user_id, error)
-        return False
+    if db_pool is not None:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO user_memories (user_id, memory_text) VALUES ($1, $2)",
+                    str(user_id),
+                    memory_text,
+                )
+            return True
+        except Exception as error:
+            logger.warning("Gagal simpan memory permanen user %s: %s", user_id, error)
+            return False
+
+    # Fallback untuk deployment tanpa DATABASE_URL. File ini tetap persisten
+    # selama folder data berada di volume/deployment yang persisten.
+    async with permanent_memory_lock:
+        entries = PERMANENT_MEMORY.setdefault(str(user_id), [])
+        if memory_text not in entries:
+            entries.append(memory_text)
+        PERMANENT_MEMORY[str(user_id)] = entries[-20:]
+        await asyncio.to_thread(save_permanent_memories, PERMANENT_MEMORY)
+    return True
 
 
 async def get_user_memories(user_id: int, limit: int = 20) -> list[str]:
     """Ambil catatan permanen user, maksimal `limit` yang terbaru (biar
     konteks yang dikirim ke AI gak membengkak tanpa batas)."""
     if db_pool is None:
-        return []
+        return PERMANENT_MEMORY.get(str(user_id), [])[-limit:]
     try:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -898,17 +929,21 @@ async def get_user_memories(user_id: int, limit: int = 20) -> list[str]:
 
 
 async def delete_user_memories(user_id: int) -> bool:
-    if db_pool is None:
-        return False
-    try:
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM user_memories WHERE user_id = $1", str(user_id)
-            )
-        return True
-    except Exception as error:
-        logger.warning("Gagal hapus memory permanen user %s: %s", user_id, error)
-        return False
+    if db_pool is not None:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM user_memories WHERE user_id = $1", str(user_id)
+                )
+            return True
+        except Exception as error:
+            logger.warning("Gagal hapus memory permanen user %s: %s", user_id, error)
+            return False
+
+    async with permanent_memory_lock:
+        PERMANENT_MEMORY.pop(str(user_id), None)
+        await asyncio.to_thread(save_permanent_memories, PERMANENT_MEMORY)
+    return True
 
 
 async def prepare_ai_prompt(
@@ -1239,14 +1274,6 @@ async def reset(interaction: discord.Interaction) -> None:
 @app_commands.describe(catatan="Hal yang mau diingat Pak Burhan (permanen)")
 async def ingat(interaction: discord.Interaction, catatan: str) -> None:
     try:
-        if db_pool is None:
-            await interaction.response.send_message(
-                "Waduh, fitur ingatan permanen belum aktif nih "
-                "(database belum tersambung). Coba lagi nanti ya.",
-                ephemeral=True,
-            )
-            return
-
         if is_rude(catatan):
             await interaction.response.send_message(POLITE_TOXIC_REPLY, ephemeral=True)
             return
@@ -1274,13 +1301,8 @@ async def ingat(interaction: discord.Interaction, catatan: str) -> None:
 @bot.tree.command(name="lupakan", description="Hapus semua ingatan permanen kamu")
 async def lupakan(interaction: discord.Interaction) -> None:
     try:
-        if db_pool is None:
-            await interaction.response.send_message(
-                "Fitur ingatan permanen belum aktif nih.", ephemeral=True
-            )
-            return
-
         success = await delete_user_memories(interaction.user.id)
+
         if success:
             await interaction.response.send_message(
                 "Sudah dilupakan semua ya. Kalau mau, bisa mulai simpan "

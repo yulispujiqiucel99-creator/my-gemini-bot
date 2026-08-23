@@ -41,6 +41,9 @@ Discord bot Pak Burhan dengan OpenRouter, memory user/channel, AI Room, slash co
    - `TAVILY_API_KEY` — daftar gratis di tavily.com (1.000 pencarian/bulan,
      tanpa kartu kredit). Kalau dikosongkan, fitur web search dilewati
      (bot tetap jalan normal untuk fitur lain).
+   - `DATABASE_URL` — opsional, berisi connection string PostgreSQL untuk
+     memory permanen. Kalau dikosongkan, `/ingat` dan `/lupakan` memakai
+     fallback lokal `data/permanent_memory.json`.
 4. Jalankan:
    `python bot.py`
 
