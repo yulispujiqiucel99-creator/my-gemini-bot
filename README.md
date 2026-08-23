@@ -44,6 +44,8 @@ Discord bot Pak Burhan dengan OpenRouter, memory user/channel, AI Room, slash co
    - `DATABASE_URL` — opsional, berisi connection string PostgreSQL untuk
      memory permanen. Kalau dikosongkan, `/ingat` dan `/lupakan` memakai
      fallback lokal `data/permanent_memory.json`.
+   - `DATA_DIR` — opsional, folder untuk memory JSON. Untuk Railway Volume yang
+     di-mount ke `/app/data`, isi `DATA_DIR=/app/data`.
    - `TTS_VOICE` — opsional, default `id-ID-ArdiNeural` untuk command `/tts`.
    - `TTS_MAX_CHARS` — opsional, batas naskah hasil ringkasan AI; default 800 karakter.
    - `TTS_SOURCE_MAX_CHARS` — opsional, batas teks mentah sebelum diringkas AI; default 12.000 karakter.

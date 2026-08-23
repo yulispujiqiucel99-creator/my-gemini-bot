@@ -68,8 +68,10 @@ except ValueError:
 # =========================
 # FILE DATA
 # =========================
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+# Railway Volume sebaiknya di-mount ke /app/data lalu DATA_DIR diisi
+# /app/data. Default data tetap aman untuk development lokal.
+DATA_DIR = Path(os.getenv("DATA_DIR", "data")).expanduser()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
 CONFIG_FILE = DATA_DIR / "config.json"
 PERMANENT_MEMORY_FILE = DATA_DIR / "permanent_memory.json"
