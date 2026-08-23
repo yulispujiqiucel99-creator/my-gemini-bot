@@ -61,7 +61,12 @@ async def main() -> None:
         assert len(fake_client.chat.completions.calls) == 2
         assert len(rewritten) <= bot.TTS_MAX_CHARS
         long_text = "kata " * bot.TTS_MAX_CHARS
-        assert len(bot.limit_tts_text(long_text)) <= bot.TTS_MAX_CHARS
+        try:
+            bot.limit_tts_text(long_text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Naskah panjang seharusnya ditolak, bukan dipotong")
 
         normalized = bot.normalize_tts_text("Halo!!! @Pak_Burhan 🤖\nTes suara.")
         assert normalized == "Halo!!! PakBurhan Tes suara.", normalized

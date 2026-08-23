@@ -481,11 +481,12 @@ def validate_tts_output(text: str) -> str:
 
 
 def limit_tts_text(text: str) -> str:
-    """Apply a hard output limit without cutting a word when possible."""
-    if len(text) <= TTS_MAX_CHARS:
-        return text
-    shortened = text[:TTS_MAX_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:-")
-    return shortened.rstrip(".!?") + "."
+    """Validate the hard output limit without cutting a sentence."""
+    if len(text) > TTS_MAX_CHARS:
+        raise ValueError(
+            f"Naskah TTS melebihi batas {TTS_MAX_CHARS} karakter dan tidak dipotong paksa"
+        )
+    return text
 
 
 async def prepare_tts_text(source_text: str) -> str:
@@ -514,8 +515,15 @@ async def prepare_tts_text(source_text: str) -> str:
                 temperature=0.2,
                 max_tokens=500,
             )
-            if is_tts_meta_response(result):
-                logger.warning("Keluaran pertama TTS terdeteksi sebagai komentar meta; meminta perbaikan.")
+            normalized_result = normalize_tts_text(result)
+            if (
+                is_tts_meta_response(result)
+                or len(normalized_result) > TTS_MAX_CHARS
+            ):
+                logger.warning(
+                    "Keluaran pertama TTS tidak layak (%s); meminta perbaikan.",
+                    "meta" if is_tts_meta_response(result) else "terlalu panjang",
+                )
                 result = await call_openrouter_single(
                     client,
                     [
@@ -722,7 +730,18 @@ def build_messages(
             "konteks aktif. Balasan user yang pendek, emoji, atau reaksi seperti "
             "wah, mantap, atau hehe biasanya menanggapi jawaban Pak Burhan "
             "sebelumnya. Balas secara nyambung dengan topik terakhir dan jangan "
-            "berpura-pura baru bertemu atau lupa konteks.]")
+            "berpura-pura baru bertemu atau lupa konteks.]"
+        )
+        last_assistant = next(
+            (item["text"] for item in reversed(history) if item.get("role") == "assistant"),
+            "",
+        )
+        if last_assistant and len(user_text.strip()) <= 120:
+            system_content += (
+                "\n\n[Jangkar balasan pendek: jawaban assistant terakhir adalah "
+                "topik utama yang sedang ditanggapi user. Gunakan konteks ini: "
+                f"{last_assistant[:900]}]"
+            )
     if user_memories:
         memory_lines = "\n".join(f"- {catatan}" for catatan in user_memories)
         system_content += (
@@ -738,18 +757,6 @@ def build_messages(
         if item.get("role") == "user" and item.get("author"):
             content = f"[{item['author']}]: {content}"
         messages.append({"role": item["role"], "content": content})
-    if history and len(user_text.strip()) <= 120:
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "[Balasan terbaru user sangat singkat. Pahami sebagai lanjutan "
-                    "dari jawaban assistant terakhir. Pertahankan topik terakhir "
-                    "dan jawab secara natural; jangan memulai topik baru atau "
-                    "mengaku lupa percakapan.]"
-                ),
-            }
-        )
     messages.append({"role": "user", "content": f"[{author_name}]: {user_text}"})
     return messages
 

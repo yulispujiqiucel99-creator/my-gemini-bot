@@ -23,6 +23,9 @@ messages = bot.build_messages(history, "Wah, enak banget 😋🤤", "Naufal")
 assert messages[-1]["role"] == "user"
 assert "Wah" in messages[-1]["content"]
 assert any("kesinambungan" in item["content"] for item in messages if item["role"] == "system")
+assert any(
+    "Pizza bermula" in item["content"] for item in messages if item["role"] == "system"
+)
 assert not any(
     item["role"] == "user" and item["content"].count("sejarah singkat") > 1
     for item in messages
