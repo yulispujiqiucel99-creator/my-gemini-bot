@@ -870,7 +870,23 @@ async def init_db() -> None:
                 )
                 """
             )
-        logger.info("PostgreSQL siap, tabel user_memories OK.")
+            # Kompatibilitas dengan tabel lama yang mungkin sudah dibuat tanpa
+            # memory_text atau created_at. ADD COLUMN IF NOT EXISTS aman untuk
+            # tabel baru maupun tabel lama dan tidak menghapus isi yang ada.
+            await conn.execute(
+                "ALTER TABLE user_memories "
+                "ADD COLUMN IF NOT EXISTS user_id TEXT"
+            )
+            await conn.execute(
+                "ALTER TABLE user_memories "
+                "ADD COLUMN IF NOT EXISTS memory_text TEXT"
+            )
+            await conn.execute(
+                "ALTER TABLE user_memories "
+                "ADD COLUMN IF NOT EXISTS created_at "
+                "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            )
+        logger.info("PostgreSQL siap, tabel user_memories kompatibel.")
     except Exception as error:
         logger.exception("Gagal inisialisasi database: %s", error)
         db_pool = None
