@@ -9,10 +9,25 @@ import bot
 
 
 class FakeCompletions:
+    def __init__(self):
+        self.calls = []
+
     async def create(self, **kwargs):
-        assert kwargs["temperature"] == 0.2
-        assert kwargs["max_tokens"] == 500
-        assert kwargs["messages"][0]["role"] == "system"
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            assert kwargs["temperature"] == 0.2
+            assert kwargs["max_tokens"] == 500
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="The user provided a very short prompt."
+                        )
+                    )
+                ]
+            )
+        assert kwargs["temperature"] == 0.1
+        assert kwargs["max_tokens"] == 400
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -32,13 +47,18 @@ class FakeClient:
 async def main() -> None:
     original_client = bot.openrouter_client
     original_client_2 = bot.openrouter_client_2
-    bot.openrouter_client = FakeClient()
+    fake_client = FakeClient()
+    bot.openrouter_client = fake_client
     bot.openrouter_client_2 = None
     try:
+        assert bot.is_tts_meta_response(
+            "According to my instructions, I cannot summarize nothing."
+        )
         rewritten = await bot.prepare_tts_text(
             "Artikel panjang yang harus dipadatkan menjadi naskah audio."
         )
         assert rewritten == "Ringkasan singkat AI. Tidak ada simbol aneh"
+        assert len(fake_client.chat.completions.calls) == 2
         assert len(rewritten) <= bot.TTS_MAX_CHARS
         long_text = "kata " * bot.TTS_MAX_CHARS
         assert len(bot.limit_tts_text(long_text)) <= bot.TTS_MAX_CHARS
