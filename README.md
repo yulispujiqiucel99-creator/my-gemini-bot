@@ -57,8 +57,9 @@ Command `/tts` mengirim teks mentah ke OpenRouter terlebih dahulu. AI akan menga
 inti informasi dan mengubahnya menjadi naskah bahasa Indonesia yang singkat, padat,
 jelas, dan enak didengar; jadi teks tidak dibacakan mentah-mentah. Setelah itu, naskah
 hasil edit dibersihkan dari simbol aneh lalu diubah menjadi file MP3 menggunakan Edge
-TTS dan dikirim sebagai attachment Discord. Fitur ini hanya berjalan melalui permintaan
-manual; bot tidak mengirim audio secara otomatis. Teks mentah dibatasi oleh
+TTS dan dikirim sebagai attachment Discord. Pesan yang sama juga menampilkan naskah
+final yang benar-benar dibacakan agar isi audio dapat dicek. Fitur ini hanya berjalan
+melalui permintaan manual; bot tidak mengirim audio secara otomatis. Teks mentah dibatasi oleh
 `TTS_SOURCE_MAX_CHARS`, sedangkan naskah hasil AI dibatasi default 800 karakter secara
 konservatif agar audio sekitar maksimal 1,5 menit; durasi aktual tetap bergantung pada
 kecepatan suara. Setiap user memiliki cooldown `TTS_COOLDOWN_SECONDS`, dan file MP3

@@ -1493,7 +1493,10 @@ async def tts(interaction: discord.Interaction, teks: str) -> None:
             audio_path = await synthesize_tts(tts_text)
         try:
             await interaction.followup.send(
-                content=f"🔊 TTS selesai · teks diringkas AI · suara `{TTS_VOICE}`",
+                content=(
+                    f"🔊 TTS selesai · teks diringkas AI · suara `{TTS_VOICE}`\n\n"
+                    f"**Naskah yang dibacakan:**\n{tts_text}"
+                ),
                 file=discord.File(audio_path, filename="pak-burhan-tts.mp3"),
             )
         finally:
